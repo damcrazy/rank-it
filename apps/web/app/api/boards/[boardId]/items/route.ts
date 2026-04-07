@@ -15,6 +15,9 @@ type Fingerprint = {
 type SubmitBody = {
   name: string
   description?: string
+  location?: string
+  gps_lat?: number | null
+  gps_lng?: number | null
   fingerprint?: Fingerprint
   /** Set when user confirmed a fuzzy-match suggestion */
   confirmed_item_id?: string
@@ -46,11 +49,19 @@ export async function POST(
   }
 
   const rawName = body.name?.trim()
+  const rawDescription = body.description?.trim()
+  const rawLocation = body.location?.trim()
   if (!rawName || rawName.length < 2) {
     return NextResponse.json({ error: "Name must be at least 2 characters." }, { status: 400 })
   }
   if (rawName.length > 255) {
     return NextResponse.json({ error: "Name too long." }, { status: 400 })
+  }
+  if (rawDescription && rawDescription.length > 500) {
+    return NextResponse.json({ error: "Description is too long." }, { status: 400 })
+  }
+  if (rawLocation && rawLocation.length > 255) {
+    return NextResponse.json({ error: "Location is too long." }, { status: 400 })
   }
 
   const supabase = createSupabaseServiceClient()
@@ -119,11 +130,14 @@ export async function POST(
       board_id: boardId,
       name: rawName,
       name_normalized: normalized,
-      description: body.description ?? null,
+      description: rawDescription || null,
+      location: rawLocation || null,
+      gps_lat: body.gps_lat ?? null,
+      gps_lng: body.gps_lng ?? null,
       vote_count: 1,
       created_by: userId,
     })
-    .select("id, name, vote_count")
+    .select("id, name, description, location, gps_lat, gps_lng, vote_count")
     .single()
 
   if (insertError) {

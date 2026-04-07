@@ -23,6 +23,9 @@ export type ItemRow = {
   name: string
   name_normalized: string
   description: string | null
+  location: string | null
+  gps_lat: number | null
+  gps_lng: number | null
   vote_count: number
   created_by: string | null
   created_at: string
@@ -68,6 +71,9 @@ export type ItemInsert = {
   name: string
   name_normalized: string
   description?: string | null
+  location?: string | null
+  gps_lat?: number | null
+  gps_lng?: number | null
   vote_count?: number
   created_by?: string | null
   created_at?: string

@@ -25,9 +25,9 @@ export function SimilarItemsModal({
 }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm border-border/70 bg-popover/95">
         <DialogHeader>
-          <DialogTitle>Did you mean one of these?</DialogTitle>
+          <DialogTitle className="font-heading text-3xl">Did you mean one of these?</DialogTitle>
           <DialogDescription>
             We found similar entries for &ldquo;{query}&rdquo;. Vote for one or create yours.
           </DialogDescription>
@@ -38,7 +38,7 @@ export function SimilarItemsModal({
             <button
               key={s.id}
               onClick={() => onConfirm(s.id)}
-              className="flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors hover:bg-accent"
+              className="flex items-center justify-between border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent"
             >
               <span className="font-medium">{s.name}</span>
               <Badge variant="secondary">{s.vote_count} {s.vote_count === 1 ? "vote" : "votes"}</Badge>

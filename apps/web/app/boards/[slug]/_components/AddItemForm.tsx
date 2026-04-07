@@ -1,12 +1,18 @@
 "use client"
 
+import dynamic from "next/dynamic"
+import { useRouter } from "next/navigation"
 import { useState, useRef } from "react"
 import { getSupabaseBrowserClient } from "@/lib/supabase-client"
+import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
+import { Textarea } from "@workspace/ui/components/textarea"
 import { PhoneAuthSheet } from "@/components/auth/PhoneAuthSheet"
 import { SimilarItemsModal } from "./SimilarItemsModal"
-import type { SimilarItem } from "@/lib/database.types"
+import type { Item, SimilarItem } from "@/lib/database.types"
+import { ChevronDownIcon, MapPinIcon, SparklesIcon } from "lucide-react"
 
 type Props = {
   boardId: string
@@ -14,8 +20,24 @@ type Props = {
 
 type SubmitStatus = "idle" | "loading" | "voted" | "created" | "already_voted" | "error"
 
+type ItemUpsertDetail = {
+  boardId: string
+  item: Item
+}
+
+const MapLocationPicker = dynamic(
+  () => import("@/components/board/MapLocationPicker").then((mod) => mod.MapLocationPicker),
+  { ssr: false }
+)
+
 export function AddItemForm({ boardId }: Props) {
+  const router = useRouter()
   const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [location, setLocation] = useState("")
+  const [gpsLat, setGpsLat] = useState<number | null>(null)
+  const [gpsLng, setGpsLng] = useState<number | null>(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [status, setStatus] = useState<SubmitStatus>("idle")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
@@ -67,6 +89,10 @@ export function AddItemForm({ boardId }: Props) {
 
     const body: Record<string, unknown> = {
       name: itemName,
+      description: description.trim() || undefined,
+      location: location.trim() || undefined,
+      gps_lat: gpsLat,
+      gps_lng: gpsLng,
       fingerprint: { ...fingerprint, ...gps },
     }
     if (confirmedId) body.confirmed_item_id = confirmedId
@@ -91,7 +117,7 @@ export function AddItemForm({ boardId }: Props) {
 
     if (res.status === 429) {
       setStatus("error")
-      setErrorMsg("Slow down! You're submitting too fast.")
+      setErrorMsg("Slow down, chaos captain. The board needs a second.")
       return
     }
 
@@ -110,11 +136,27 @@ export function AddItemForm({ boardId }: Props) {
     if (data.status === "voted" || data.status === "created") {
       setStatus(data.status === "created" ? "created" : "voted")
       setName("")
+      setDescription("")
+      setLocation("")
+      setGpsLat(null)
+      setGpsLng(null)
+      setDetailsOpen(false)
+      if (typeof window !== "undefined" && data.item) {
+        window.dispatchEvent(
+          new CustomEvent<ItemUpsertDetail>("board:item-upserted", {
+            detail: {
+              boardId,
+              item: data.item as Item,
+            },
+          })
+        )
+      }
+      router.refresh()
       return
     }
 
     setStatus("error")
-    setErrorMsg(data.error ?? "Something went wrong.")
+    setErrorMsg(data.error ?? "The ranking machine glitched. Try that again.")
   }
 
   // Called after phone auth succeeds — retry the pending submission
@@ -141,37 +183,106 @@ export function AddItemForm({ boardId }: Props) {
     submit(name + "\u200B")
   }
 
-  const isIdle = status === "idle" || status === "error"
-
   return (
     <>
       <form
         onSubmit={(e) => { e.preventDefault(); if (name.trim().length >= 2) submit(name.trim()) }}
-        className="flex gap-2"
+        className="flex flex-col gap-3"
       >
-        <Input
-          placeholder="Add a place, restaurant, spot…"
-          value={name}
-          onChange={(e) => { setName(e.target.value); if (status !== "idle") setStatus("idle") }}
-          disabled={status === "loading"}
-          className="flex-1"
-        />
-        <Button type="submit" disabled={status === "loading" || name.trim().length < 2}>
-          {status === "loading" ? "Adding…" : "Add"}
-        </Button>
+        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+          <Input
+            placeholder="Add a place, restaurant, spot…"
+            value={name}
+            onChange={(e) => { setName(e.target.value); if (status !== "idle") setStatus("idle") }}
+            disabled={status === "loading"}
+            className="min-h-12"
+          />
+          <Button type="submit" size="lg" disabled={status === "loading" || name.trim().length < 2}>
+            {status === "loading" ? "Adding…" : "Add"}
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setDetailsOpen((open) => !open)}
+            className="group"
+          >
+            <SparklesIcon data-icon="inline-start" />
+            Add more details
+            <ChevronDownIcon
+              data-icon="inline-end"
+              className={`transition-transform ${detailsOpen ? "rotate-180" : ""}`}
+            />
+          </Button>
+          {(description || location) && (
+            <Badge variant="secondary" className="gap-1">
+              <MapPinIcon />
+              Extra details ready
+            </Badge>
+          )}
+        </div>
+
+        {detailsOpen && (
+          <div className="grid gap-4 border-2 border-black bg-card p-4 shadow-[4px_4px_0_#111]">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="item-description">Short description</Label>
+                <Textarea
+                  id="item-description"
+                  placeholder="Why this pick deserves to rank."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={4}
+                  maxLength={500}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label>Picked place</Label>
+                <div className="border-2 border-black bg-[#fff3cb] p-4 text-sm font-medium text-black">
+                  Optional. Great for specific branches like Blue Tokai, Indiranagar.
+                </div>
+              </div>
+            </div>
+
+            <MapLocationPicker
+              key={`${location}:${gpsLat ?? "none"}:${gpsLng ?? "none"}`}
+              value={{ label: location, lat: gpsLat, lng: gpsLng }}
+              onChange={(next) => {
+                setLocation(next.label)
+                setGpsLat(next.lat)
+                setGpsLng(next.lng)
+              }}
+              label="Entry location"
+              placeholder="Search for the exact branch or click on the map"
+              helperText="Optional. Pick the exact spot for this entry."
+              mapHeightClassName="h-[220px]"
+            />
+          </div>
+        )}
       </form>
 
       {status === "voted" && (
-        <p className="text-sm text-green-600 mt-1">Vote counted!</p>
+        <p className="mt-1 border-2 border-black bg-[#25dbe0] px-3 py-2 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          Crowd energy locked in. Vote counted.
+        </p>
       )}
       {status === "created" && (
-        <p className="text-sm text-green-600 mt-1">Added to the board!</p>
+        <p className="mt-1 border-2 border-black bg-[#ffe16a] px-3 py-2 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          Fresh entry dropped on the board.
+        </p>
       )}
       {status === "already_voted" && (
-        <p className="text-sm text-muted-foreground mt-1">You already voted for this one.</p>
+        <p className="mt-1 border-2 border-black bg-[#f55bb0] px-3 py-2 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          Plot twist: your vote is already in the machine.
+        </p>
       )}
       {status === "error" && errorMsg && (
-        <p className="text-sm text-destructive mt-1">{errorMsg}</p>
+        <p className="mt-1 border-2 border-black bg-[#f7d7f4] px-3 py-2 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          {errorMsg}
+        </p>
       )}
 
       <PhoneAuthSheet
