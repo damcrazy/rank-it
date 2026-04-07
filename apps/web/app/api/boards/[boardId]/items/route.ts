@@ -23,6 +23,59 @@ type SubmitBody = {
   confirmed_item_id?: string
 }
 
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ boardId: string }> }
+) {
+  const { boardId } = await params
+  const query = req.nextUrl.searchParams.get("q")?.trim()
+
+  if (!query || query.length < 2) {
+    return NextResponse.json({ suggestions: [] satisfies SimilarItem[] })
+  }
+
+  const supabase = createSupabaseServiceClient()
+
+  const [{ data: byName }, { data: fuzzy }] = await Promise.all([
+    supabase
+      .from("items")
+      .select("id, name, vote_count")
+      .eq("board_id", boardId)
+      .ilike("name", `%${query}%`)
+      .order("vote_count", { ascending: false })
+      .limit(5),
+    supabase.rpc("find_similar_items", {
+      p_board_id: boardId,
+      p_name: query,
+      p_threshold: 0.45,
+    }),
+  ])
+
+  const merged = new Map<string, SimilarItem>()
+
+  for (const item of byName ?? []) {
+    merged.set(item.id, {
+      id: item.id,
+      name: item.name,
+      vote_count: item.vote_count,
+      sim: 1,
+    })
+  }
+
+  for (const item of (fuzzy as SimilarItem[] | null) ?? []) {
+    const existing = merged.get(item.id)
+    if (!existing || item.sim > existing.sim) {
+      merged.set(item.id, item)
+    }
+  }
+
+  return NextResponse.json({
+    suggestions: [...merged.values()]
+      .sort((a, b) => (b.sim !== a.sim ? b.sim - a.sim : b.vote_count - a.vote_count))
+      .slice(0, 5),
+  })
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ boardId: string }> }

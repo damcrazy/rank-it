@@ -11,6 +11,7 @@ export type BoardRow = {
   location: string | null
   gps_lat: number | null
   gps_lng: number | null
+  area_polygon: Json | null
   created_by: string | null
   view_count: number
   created_at: string
@@ -59,6 +60,7 @@ export type BoardInsert = {
   location?: string | null
   gps_lat?: number | null
   gps_lng?: number | null
+  area_polygon?: Json | null
   created_by?: string | null
   view_count?: number
   created_at?: string

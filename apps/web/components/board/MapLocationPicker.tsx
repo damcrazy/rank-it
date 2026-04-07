@@ -1,12 +1,18 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet"
+import { useEffect, useMemo, useState } from "react"
+import { CircleMarker, MapContainer, Marker, Polygon, TileLayer, useMap, useMapEvents } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
+import { Badge } from "@workspace/ui/components/badge"
+
+export type MapPoint = {
+  lat: number
+  lng: number
+}
 
 type LocationValue = {
   label: string
@@ -24,6 +30,8 @@ type SearchResult = {
 type Props = {
   value: LocationValue
   onChange: (value: LocationValue) => void
+  areaPoints?: MapPoint[]
+  onAreaPointsChange?: (points: MapPoint[]) => void
   label?: string
   placeholder?: string
   helperText?: string
@@ -56,21 +64,75 @@ async function reverseLookup(lat: number, lng: number) {
 
 function MapClickHandler({
   onPick,
+  onFencePointAdd,
 }: {
-  onPick: (lat: number, lng: number) => void
+  onPick?: (lat: number, lng: number) => void
+  onFencePointAdd?: (lat: number, lng: number) => void
 }) {
   useMapEvents({
     click(event) {
-      onPick(event.latlng.lat, event.latlng.lng)
+      if (onFencePointAdd) {
+        onFencePointAdd(event.latlng.lat, event.latlng.lng)
+        return
+      }
+      onPick?.(event.latlng.lat, event.latlng.lng)
     },
   })
 
   return null
 }
 
+function RecenterMap({
+  center,
+  zoom,
+}: {
+  center: [number, number]
+  zoom: number
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    map.setView(center, zoom, { animate: true })
+  }, [center, map, zoom])
+
+  return null
+}
+
+function MapZoomControls() {
+  const map = useMap()
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.target instanceof HTMLElement) {
+        const tag = event.target.tagName
+        if (tag === "INPUT" || tag === "TEXTAREA" || event.target.isContentEditable) return
+      }
+
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault()
+        map.zoomIn()
+      }
+
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault()
+        map.zoomOut()
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [map])
+
+  return (
+    null
+  )
+}
+
 export function MapLocationPicker({
   value,
   onChange,
+  areaPoints = [],
+  onAreaPointsChange,
   label = "Board location",
   placeholder = "Search a place or click on the map",
   helperText = "Optional. Pick a point on the map so people can discover this board by place.",
@@ -80,20 +142,44 @@ export function MapLocationPicker({
   const [results, setResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [resolving, setResolving] = useState(false)
+  const [searchEmpty, setSearchEmpty] = useState(false)
+  const [mapCenter, setMapCenter] = useState<[number, number]>(
+    value.lat != null && value.lng != null ? [value.lat, value.lng] : DEFAULT_CENTER
+  )
+  const [mapZoom, setMapZoom] = useState(5)
 
-  const center = useMemo<[number, number]>(() => {
-    if (value.lat != null && value.lng != null) return [value.lat, value.lng]
-    return DEFAULT_CENTER
-  }, [value.lat, value.lng])
+  const center = useMemo<[number, number]>(() => mapCenter, [mapCenter])
+
+  const polygonPositions = useMemo<[number, number][]>(
+    () => areaPoints.map((point) => [point.lat, point.lng]),
+    [areaPoints]
+  )
+
+  function addFencePoint(lat: number, lng: number) {
+    if (!onAreaPointsChange) return
+    onAreaPointsChange([...areaPoints, { lat, lng }])
+  }
+
+  function removeLastFencePoint() {
+    if (!onAreaPointsChange) return
+    onAreaPointsChange(areaPoints.slice(0, -1))
+  }
+
+  function clearFence() {
+    if (!onAreaPointsChange) return
+    onAreaPointsChange([])
+  }
 
   async function searchPlaces() {
     const trimmed = query.trim()
     if (!trimmed) {
       setResults([])
+      setSearchEmpty(false)
       return
     }
 
     setSearching(true)
+    setSearchEmpty(false)
     const url = new URL("https://nominatim.openstreetmap.org/search")
     url.searchParams.set("format", "jsonv2")
     url.searchParams.set("q", trimmed)
@@ -107,6 +193,7 @@ export function MapLocationPicker({
     if (!res.ok) return
     const data = (await res.json()) as SearchResult[]
     setResults(data)
+    setSearchEmpty(data.length === 0)
   }
 
   async function setPickedLocation(lat: number, lng: number, fallbackLabel?: string) {
@@ -116,6 +203,9 @@ export function MapLocationPicker({
     const label = resolved ?? fallbackLabel ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
     setQuery(label)
     setResults([])
+    setSearchEmpty(false)
+    setMapCenter([lat, lng])
+    setMapZoom(13)
 
     onChange({
       label,
@@ -157,6 +247,39 @@ export function MapLocationPicker({
         </div>
       </div>
 
+      {onAreaPointsChange && (
+        <div className="flex flex-col gap-3 border-2 border-black bg-[#fff3cb] p-4 shadow-[4px_4px_0_#111]">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="bg-[#f55bb0] text-black">Area fence</Badge>
+            <Badge className="bg-white text-black">{areaPoints.length} {areaPoints.length === 1 ? "point" : "points"}</Badge>
+            {areaPoints.length >= 3 && <Badge className="bg-[#25dbe0] text-black">closed shape ready</Badge>}
+          </div>
+          <p className="text-sm font-medium text-black/75">
+            Search a place to frame the map, then click the map to draw the board area. A valid fence needs at least 3 points.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={removeLastFencePoint}
+              disabled={areaPoints.length === 0}
+              className="bg-white text-black disabled:opacity-50"
+            >
+              Undo last point
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={clearFence}
+              disabled={areaPoints.length === 0}
+              className="bg-white text-black disabled:opacity-50"
+            >
+              Clear fence
+            </Button>
+          </div>
+        </div>
+      )}
+
       {results.length > 0 && (
         <div className="grid gap-2">
           {results.map((result) => (
@@ -166,6 +289,9 @@ export function MapLocationPicker({
               onClick={() => {
                 setQuery(result.display_name)
                 setResults([])
+                setSearchEmpty(false)
+                setMapCenter([Number(result.lat), Number(result.lon)])
+                setMapZoom(13)
                 onChange({
                   label: result.display_name,
                   lat: Number(result.lat),
@@ -180,15 +306,40 @@ export function MapLocationPicker({
         </div>
       )}
 
+      {searchEmpty && (
+        <div className="border-2 border-black bg-[#f55bb0] px-4 py-3 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          Search gremlin found nothing. Try a nearby landmark, area, or a cleaner place name.
+        </div>
+      )}
+
       <div className="overflow-hidden border-4 border-black shadow-[6px_6px_0_#111]">
-        <MapContainer center={center} zoom={value.lat != null ? 13 : 5} className={`${mapHeightClassName} w-full`}>
+        <MapContainer center={center} zoom={mapZoom} className={`${mapHeightClassName} relative w-full`}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <MapClickHandler onPick={(lat, lng) => void setPickedLocation(lat, lng)} />
+          <RecenterMap center={center} zoom={mapZoom} />
+          <MapZoomControls />
+          <MapClickHandler
+            onPick={onAreaPointsChange ? undefined : (lat, lng) => void setPickedLocation(lat, lng)}
+            onFencePointAdd={onAreaPointsChange ? addFencePoint : undefined}
+          />
           {value.lat != null && value.lng != null && (
             <Marker position={[value.lat, value.lng]} icon={markerIcon} />
+          )}
+          {polygonPositions.map((position, index) => (
+            <CircleMarker
+              key={`${position[0]}:${position[1]}:${index}`}
+              center={position}
+              radius={6}
+              pathOptions={{ color: "#111", fillColor: "#25dbe0", fillOpacity: 1, weight: 3 }}
+            />
+          ))}
+          {polygonPositions.length >= 2 && (
+            <Polygon
+              positions={polygonPositions}
+              pathOptions={{ color: "#111", fillColor: "#f55bb0", fillOpacity: 0.18, weight: 3 }}
+            />
           )}
         </MapContainer>
       </div>
@@ -196,9 +347,13 @@ export function MapLocationPicker({
       <p className="text-xs text-muted-foreground">
         {resolving
           ? "Resolving picked location..."
+          : onAreaPointsChange && areaPoints.length > 0 && areaPoints.length < 3
+            ? "Fence started. Add at least 3 points to make a real area."
+          : onAreaPointsChange && areaPoints.length >= 3
+            ? `Area fence ready with ${areaPoints.length} points.`
           : value.lat != null && value.lng != null
             ? `Picked location: ${value.label}`
-            : helperText}
+            : `${helperText} Use + / - keys or the map buttons to zoom.`}
       </p>
     </div>
   )

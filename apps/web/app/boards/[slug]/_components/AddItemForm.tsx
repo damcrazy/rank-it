@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
-import { useState, useRef } from "react"
+import { useDeferredValue, useEffect, useRef, useState } from "react"
 import { getSupabaseBrowserClient } from "@/lib/supabase-client"
 import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
@@ -33,6 +33,7 @@ const MapLocationPicker = dynamic(
 export function AddItemForm({ boardId }: Props) {
   const router = useRouter()
   const [name, setName] = useState("")
+  const deferredName = useDeferredValue(name)
   const [description, setDescription] = useState("")
   const [location, setLocation] = useState("")
   const [gpsLat, setGpsLat] = useState<number | null>(null)
@@ -43,6 +44,8 @@ export function AddItemForm({ boardId }: Props) {
   const [authOpen, setAuthOpen] = useState(false)
   const [suggestions, setSuggestions] = useState<SimilarItem[]>([])
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [liveSuggestions, setLiveSuggestions] = useState<SimilarItem[]>([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   // Store pending submission data so we can retry after auth
   const pendingRef = useRef<{ name: string; confirmedId?: string } | null>(null)
 
@@ -55,6 +58,40 @@ export function AddItemForm({ boardId }: Props) {
       language: navigator.language,
     }
   }
+
+  useEffect(() => {
+    const query = deferredName.trim()
+
+    if (query.length < 2) {
+      setLiveSuggestions([])
+      setSuggestionsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setSuggestionsLoading(true)
+
+      try {
+        const res = await fetch(`/api/boards/${boardId}/items?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        })
+        const data = (await res.json()) as { suggestions?: SimilarItem[] }
+        setLiveSuggestions(data.suggestions ?? [])
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setLiveSuggestions([])
+        }
+      } finally {
+        setSuggestionsLoading(false)
+      }
+    }, 220)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [boardId, deferredName])
 
   async function getGps(): Promise<{ gps_lat?: number; gps_lng?: number }> {
     return new Promise((resolve) => {
@@ -189,17 +226,55 @@ export function AddItemForm({ boardId }: Props) {
         onSubmit={(e) => { e.preventDefault(); if (name.trim().length >= 2) submit(name.trim()) }}
         className="flex flex-col gap-3"
       >
-        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-          <Input
-            placeholder="Add a place, restaurant, spot…"
-            value={name}
-            onChange={(e) => { setName(e.target.value); if (status !== "idle") setStatus("idle") }}
-            disabled={status === "loading"}
-            className="min-h-12"
-          />
-          <Button type="submit" size="lg" disabled={status === "loading" || name.trim().length < 2}>
-            {status === "loading" ? "Adding…" : "Add"}
-          </Button>
+        <div className="flex flex-col gap-3">
+          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <Input
+              placeholder="Add a place, restaurant, spot…"
+              value={name}
+              onChange={(e) => { setName(e.target.value); if (status !== "idle") setStatus("idle") }}
+              disabled={status === "loading"}
+              className="min-h-12"
+            />
+            <Button type="submit" size="lg" disabled={status === "loading" || name.trim().length < 2}>
+              {status === "loading" ? "Adding…" : "Add"}
+            </Button>
+          </div>
+
+          {(suggestionsLoading || liveSuggestions.length > 0) && (
+            <div className="grid gap-2 border-2 border-black bg-card p-3 shadow-[4px_4px_0_#111]">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-black/60">
+                  Duplicate radar
+                </p>
+                {suggestionsLoading && (
+                  <span className="text-xs font-black uppercase tracking-[0.18em] text-black/60">
+                    sniffing the board...
+                  </span>
+                )}
+              </div>
+
+              {liveSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  onClick={() => submit(name.trim(), suggestion.id)}
+                  className="flex items-center justify-between gap-3 border-2 border-black bg-[#fff3cb] px-4 py-3 text-left shadow-[3px_3px_0_#111] transition-transform hover:-translate-y-0.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black uppercase tracking-[0.08em] text-black">
+                      {suggestion.name}
+                    </p>
+                    <p className="text-xs font-medium text-black/70">
+                      Same chaos, already on the board. Tap to boost it.
+                    </p>
+                  </div>
+                  <Badge className="shrink-0 bg-[#25dbe0] text-black">
+                    {suggestion.vote_count} {suggestion.vote_count === 1 ? "vote" : "votes"}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

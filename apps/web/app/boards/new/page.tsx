@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import type { MapPoint } from "@/components/board/MapLocationPicker"
 
 const MapLocationPicker = dynamic(
   () => import("@/components/board/MapLocationPicker").then((mod) => mod.MapLocationPicker),
@@ -49,6 +50,20 @@ function slugify(str: string): string {
   )
 }
 
+function buildAreaPolygon(points: MapPoint[]) {
+  if (points.length < 3) return null
+
+  const coordinates = points.map((point) => [point.lng, point.lat])
+  const firstPoint = points[0]
+  if (!firstPoint) return null
+  coordinates.push([firstPoint.lng, firstPoint.lat])
+
+  return {
+    type: "Polygon",
+    coordinates: [coordinates],
+  }
+}
+
 export default function NewBoardPage() {
   const router = useRouter()
 
@@ -59,6 +74,7 @@ export default function NewBoardPage() {
   const [location, setLocation] = useState("")
   const [gpsLat, setGpsLat] = useState<number | null>(null)
   const [gpsLng, setGpsLng] = useState<number | null>(null)
+  const [areaPoints, setAreaPoints] = useState<MapPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -69,6 +85,10 @@ export default function NewBoardPage() {
     e.preventDefault()
     if (!title.trim()) return
     if (isCustom && !customCategory.trim()) return
+    if (areaPoints.length > 0 && areaPoints.length < 3) {
+      setError("Fence started, but the area is still missing a point. Give it at least 3.")
+      return
+    }
 
     setError(null)
     setLoading(true)
@@ -89,6 +109,7 @@ export default function NewBoardPage() {
         location: location.trim() || null,
         gps_lat: gpsLat,
         gps_lng: gpsLng,
+        area_polygon: buildAreaPolygon(areaPoints),
         created_by: session?.user?.id ?? null,
       })
       .select("slug")
@@ -210,7 +231,7 @@ export default function NewBoardPage() {
                 <div className="flex flex-col gap-1.5">
                   <Label>Discovery</Label>
                   <div className="border-2 border-black bg-[#fff3cb] p-4 text-sm font-medium text-black">
-                    Add a map location so people can discover this board by place.
+                    Add a map anchor and optionally draw a freeform area fence for the whole board.
                   </div>
                 </div>
               </div>
@@ -218,6 +239,8 @@ export default function NewBoardPage() {
               <MapLocationPicker
                 key={`${location}:${gpsLat ?? "none"}:${gpsLng ?? "none"}`}
                 value={{ label: location, lat: gpsLat, lng: gpsLng }}
+                areaPoints={areaPoints}
+                onAreaPointsChange={setAreaPoints}
                 onChange={(next) => {
                   setLocation(next.label)
                   setGpsLat(next.lat)
@@ -241,8 +264,19 @@ export default function NewBoardPage() {
                 </div>
               )}
 
+              {areaPoints.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Area coverage</Label>
+                  <div className="border-2 border-black bg-white px-4 py-3 text-sm font-medium text-black shadow-[3px_3px_0_#111]">
+                    {areaPoints.length < 3
+                      ? `Fence started with ${areaPoints.length} point${areaPoints.length === 1 ? "" : "s"}. Add at least ${3 - areaPoints.length} more.`
+                      : `Area fence locked with ${areaPoints.length} points.`}
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3">
-                {location && (
+                {(location || areaPoints.length > 0) && (
                   <Button
                     type="button"
                     variant="outline"
@@ -250,14 +284,19 @@ export default function NewBoardPage() {
                       setLocation("")
                       setGpsLat(null)
                       setGpsLng(null)
+                      setAreaPoints([])
                     }}
                   >
-                    Clear location
+                    Clear map setup
                   </Button>
                 )}
               </div>
 
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && (
+                <p className="border-2 border-black bg-[#f7d7f4] px-3 py-2 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+                  {error}
+                </p>
+              )}
 
               <Button
                 type="submit"
