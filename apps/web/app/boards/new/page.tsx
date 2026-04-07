@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import { getAreaFenceIssue } from "@/components/board/MapLocationPicker"
 import type { MapPoint } from "@/components/board/MapLocationPicker"
 
 const MapLocationPicker = dynamic(
@@ -80,13 +81,14 @@ export default function NewBoardPage() {
 
   const isCustom = category === CUSTOM_VALUE
   const finalCategory = isCustom ? customCategory.trim() : category
+  const areaFenceIssue = getAreaFenceIssue(areaPoints)
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim()) return
     if (isCustom && !customCategory.trim()) return
-    if (areaPoints.length > 0 && areaPoints.length < 3) {
-      setError("Fence started, but the area is still missing a point. Give it at least 3.")
+    if (areaFenceIssue) {
+      setError(areaFenceIssue)
       return
     }
 
@@ -268,8 +270,8 @@ export default function NewBoardPage() {
                 <div className="flex flex-col gap-1.5">
                   <Label>Area coverage</Label>
                   <div className="border-2 border-black bg-white px-4 py-3 text-sm font-medium text-black shadow-[3px_3px_0_#111]">
-                    {areaPoints.length < 3
-                      ? `Fence started with ${areaPoints.length} point${areaPoints.length === 1 ? "" : "s"}. Add at least ${3 - areaPoints.length} more.`
+                    {areaFenceIssue
+                      ? areaFenceIssue
                       : `Area fence locked with ${areaPoints.length} points.`}
                   </div>
                 </div>
@@ -301,7 +303,7 @@ export default function NewBoardPage() {
               <Button
                 type="submit"
                 size="lg"
-                disabled={loading || title.trim().length < 3 || (isCustom && !customCategory.trim())}
+                disabled={loading || title.trim().length < 3 || (isCustom && !customCategory.trim()) || Boolean(areaFenceIssue)}
               >
                 {loading ? "Creating…" : "Create board"}
               </Button>

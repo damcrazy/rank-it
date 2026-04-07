@@ -14,6 +14,90 @@ export type MapPoint = {
   lng: number
 }
 
+function orientation(a: MapPoint, b: MapPoint, c: MapPoint) {
+  return (b.lng - a.lng) * (c.lat - a.lat) - (b.lat - a.lat) * (c.lng - a.lng)
+}
+
+function onSegment(a: MapPoint, b: MapPoint, c: MapPoint) {
+  return (
+    Math.min(a.lng, c.lng) <= b.lng &&
+    b.lng <= Math.max(a.lng, c.lng) &&
+    Math.min(a.lat, c.lat) <= b.lat &&
+    b.lat <= Math.max(a.lat, c.lat)
+  )
+}
+
+function segmentsIntersect(a: MapPoint, b: MapPoint, c: MapPoint, d: MapPoint) {
+  const o1 = orientation(a, b, c)
+  const o2 = orientation(a, b, d)
+  const o3 = orientation(c, d, a)
+  const o4 = orientation(c, d, b)
+
+  if (o1 === 0 && onSegment(a, c, b)) return true
+  if (o2 === 0 && onSegment(a, d, b)) return true
+  if (o3 === 0 && onSegment(c, a, d)) return true
+  if (o4 === 0 && onSegment(c, b, d)) return true
+
+  return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0)
+}
+
+function estimateFenceSpanKm(points: MapPoint[]) {
+  if (points.length < 2) return 0
+
+  let minLat = points[0]?.lat ?? 0
+  let maxLat = minLat
+  let minLng = points[0]?.lng ?? 0
+  let maxLng = minLng
+
+  for (const point of points) {
+    minLat = Math.min(minLat, point.lat)
+    maxLat = Math.max(maxLat, point.lat)
+    minLng = Math.min(minLng, point.lng)
+    maxLng = Math.max(maxLng, point.lng)
+  }
+
+  const latKm = (maxLat - minLat) * 111
+  const lngKm = (maxLng - minLng) * 111 * Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180)
+  return Math.sqrt(latKm * latKm + lngKm * lngKm)
+}
+
+export function getAreaFenceIssue(points: MapPoint[]) {
+  if (points.length === 0) return null
+  if (points.length < 3) {
+    return "Fence started, but the area is still missing a point. Give it at least 3."
+  }
+
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i]
+    const b = points[(i + 1) % points.length]
+    if (!a || !b) continue
+
+    for (let j = i + 1; j < points.length; j += 1) {
+      const c = points[j]
+      const d = points[(j + 1) % points.length]
+      if (!c || !d) continue
+
+      const sharesEndpoint =
+        i === j ||
+        (i + 1) % points.length === j ||
+        i === (j + 1) % points.length
+
+      if (sharesEndpoint) continue
+
+      if (segmentsIntersect(a, b, c, d)) {
+        return "Fence gremlin alert: the shape is crossing over itself. Clean up the loops."
+      }
+    }
+  }
+
+  const spanKm = estimateFenceSpanKm(points)
+  if (spanKm > 1200) {
+    return "This fence is going full world-tour. Zoom in and keep the board area tighter."
+  }
+
+  return null
+}
+
 type LocationValue = {
   label: string
   lat: number | null
@@ -154,6 +238,7 @@ export function MapLocationPicker({
     () => areaPoints.map((point) => [point.lat, point.lng]),
     [areaPoints]
   )
+  const areaFenceIssue = useMemo(() => getAreaFenceIssue(areaPoints), [areaPoints])
 
   function addFencePoint(lat: number, lng: number) {
     if (!onAreaPointsChange) return
@@ -344,17 +429,23 @@ export function MapLocationPicker({
         </MapContainer>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        {resolving
-          ? "Resolving picked location..."
-          : onAreaPointsChange && areaPoints.length > 0 && areaPoints.length < 3
-            ? "Fence started. Add at least 3 points to make a real area."
-          : onAreaPointsChange && areaPoints.length >= 3
-            ? `Area fence ready with ${areaPoints.length} points.`
-          : value.lat != null && value.lng != null
+      {resolving ? (
+        <p className="text-xs text-muted-foreground">Resolving picked location...</p>
+      ) : onAreaPointsChange && areaFenceIssue ? (
+        <div className="border-2 border-black bg-[#ff7a6b] px-4 py-3 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          {areaFenceIssue}
+        </div>
+      ) : onAreaPointsChange && areaPoints.length >= 3 ? (
+        <div className="border-2 border-black bg-[#25dbe0] px-4 py-3 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0_#111]">
+          Area fence ready with {areaPoints.length} points.
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {value.lat != null && value.lng != null
             ? `Picked location: ${value.label}`
-            : `${helperText} Use + / - keys or the map buttons to zoom.`}
-      </p>
+            : `${helperText} Use + / - keys or the native map controls to zoom.`}
+        </p>
+      )}
     </div>
   )
 }
