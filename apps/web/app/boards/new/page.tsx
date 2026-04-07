@@ -18,8 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
-import { getAreaFenceIssue } from "@/components/board/MapLocationPicker"
-import type { MapPoint } from "@/components/board/MapLocationPicker"
+import { getAreaFenceIssue, type MapPoint } from "@/components/board/map-fence"
 
 const MapLocationPicker = dynamic(
   () => import("@/components/board/MapLocationPicker").then((mod) => mod.MapLocationPicker),
